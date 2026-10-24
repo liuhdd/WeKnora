@@ -26,7 +26,7 @@
             <div class="widget-mock-page__line" />
             <div class="widget-mock-page__line widget-mock-page__line--short" />
           </div>
-          <button type="button" class="widget-launcher" :style="{ background: primaryColor || 'var(--td-brand-color)' }"
+          <button type="button" class="widget-launcher" :style="{ background: primaryColor || 'var(--td-brand-color)', color: primaryColor ? 'var(--td-text-color-anti)' : 'var(--app-brand-foreground)' }"
             :aria-label="widgetOpen ? $t('common.close') : $t('embedPublish.preview')"
             @click="widgetOpen = !widgetOpen">
             <t-icon :name="widgetOpen ? 'close' : 'chat'" />

@@ -2937,7 +2937,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     padding: 0 12px;
     border-radius: var(--app-radius-md);
     background: var(--td-brand-color);
-    color: var(--td-text-color-anti);
+    color: var(--app-brand-foreground);
     &:hover { background: var(--td-brand-color-hover); }
   }
 }

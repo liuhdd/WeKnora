@@ -6,8 +6,10 @@ import {
 } from './preferenceStorage'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
+export type ThemePreset = 'weknora' | 'claude' | 'chatgpt'
 
 const THEME_KEY = 'theme'
+const PRESET_KEY = 'theme_preset'
 
 function loadTheme(): ThemeMode {
   const v = loadPreference(THEME_KEY)
@@ -15,18 +17,23 @@ function loadTheme(): ThemeMode {
   return 'light'
 }
 
-// Shared reactive state across all consumers
-const currentTheme = ref<ThemeMode>(loadTheme())
+function loadPreset(): ThemePreset {
+  const value = loadPreference(PRESET_KEY)
+  if (value === 'claude' || value === 'chatgpt') return value
+  return 'weknora'
+}
 
-let lastEffective: 'light' | 'dark' | null = null
+// 明暗模式与配色独立保存，并在所有入口共享。 / Mode and palette are saved independently and shared across consumers.
+const currentTheme = ref<ThemeMode>(loadTheme())
+const currentPreset = ref<ThemePreset>(loadPreset())
 
 function getSystemTheme(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-/** Wails：与原生窗口底色 / 系统深浅色一致，减轻 Ctrl+R 整窗白闪（浅色与 --td-bg-color-page #eee 对齐） */
+/** 原生窗口与页面使用同一背景令牌，避免刷新闪动。 / Keep native chrome and page backgrounds aligned to prevent reload flashes. */
 function syncWailsNativeChrome(effective: 'light' | 'dark') {
-  const bg = effective === 'dark' ? '#181818' : '#eeeeee'
+  const bg = 'var(--td-bg-color-page)'
   document.documentElement.style.background = bg
   document.documentElement.style.minHeight = '100%'
   document.documentElement.style.colorScheme = effective === 'dark' ? 'dark' : 'light'
@@ -39,7 +46,7 @@ function syncWailsNativeChrome(effective: 'light' | 'dark') {
     appEl.style.background = bg
     appEl.style.minHeight = '100%'
   }
-  const w = (window as unknown as {
+  const w = (window as Window & {
     runtime?: {
       WindowSetDarkTheme?: () => void
       WindowSetLightTheme?: () => void
@@ -47,24 +54,18 @@ function syncWailsNativeChrome(effective: 'light' | 'dark') {
     }
   }).runtime
   if (!w?.WindowSetBackgroundColour) return
-  try {
-    if (effective === 'dark') {
-      w.WindowSetDarkTheme?.()
-      w.WindowSetBackgroundColour(24, 24, 24, 255)
-    } else {
-      w.WindowSetLightTheme?.()
-      w.WindowSetBackgroundColour(238, 238, 238, 255)
-    }
-  } catch {
-    /* 非桌面壳或未注入 runtime */
-  }
+  const background = getComputedStyle(document.documentElement).backgroundColor
+  const channels = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(background)
+  if (!channels) throw new TypeError(`Unsupported theme background color: ${background}`)
+  if (effective === 'dark') w.WindowSetDarkTheme?.()
+  else w.WindowSetLightTheme?.()
+  w.WindowSetBackgroundColour(Number(channels[1]), Number(channels[2]), Number(channels[3]), 255)
 }
 
 function applyTheme(mode: ThemeMode) {
   const effective = mode === 'system' ? getSystemTheme() : mode
-  if (lastEffective === effective) return
-  lastEffective = effective
   document.documentElement.setAttribute('theme-mode', effective)
+  document.documentElement.setAttribute('data-theme-preset', currentPreset.value)
   syncWailsNativeChrome(effective)
 }
 
@@ -77,12 +78,21 @@ export function useTheme() {
     return true
   }
 
-  return { currentTheme, setTheme }
+  function setPreset(preset: ThemePreset): boolean {
+    if (preset !== 'weknora' && preset !== 'claude' && preset !== 'chatgpt') return false
+    currentPreset.value = preset
+    savePreference(PRESET_KEY, preset)
+    applyTheme(currentTheme.value)
+    return true
+  }
+
+  return { currentTheme, setTheme, currentPreset, setPreset }
 }
 
 /** Call once in main.ts to initialise theme and listen for OS changes. */
 export function initTheme() {
   currentTheme.value = loadTheme()
+  currentPreset.value = loadPreset()
   applyTheme(currentTheme.value)
 
   // React to OS theme changes when user chose "system"
@@ -97,5 +107,6 @@ export function initTheme() {
 export function reloadThemeFromStorage() {
   migratePreferencesIntoUser()
   currentTheme.value = loadTheme()
+  currentPreset.value = loadPreset()
   applyTheme(currentTheme.value)
 }

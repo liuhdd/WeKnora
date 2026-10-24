@@ -3651,7 +3651,7 @@ const getImgSrc = (url: string) => {
     top: -2px;
     right: -2px;
     background: var(--td-brand-color);
-    color: var(--td-text-color-anti);
+    color: var(--app-brand-foreground);
     font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
@@ -3690,7 +3690,7 @@ const getImgSrc = (url: string) => {
     top: -2px;
     right: -2px;
     background: var(--td-brand-color);
-    color: var(--td-text-color-anti);
+    color: var(--app-brand-foreground);
     font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
@@ -3898,7 +3898,7 @@ const getImgSrc = (url: string) => {
 
 .stop-btn, .send-btn {
   background-color: var(--td-brand-color);
-  color: #fff;
+  color: var(--app-brand-foreground);
 
   &:hover:not(.disabled) {
     background-color: var(--td-brand-color-active);

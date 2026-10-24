@@ -350,7 +350,7 @@ defineExpose({ handleKey })
 .is-selected .ask-field-option-mark {
   background: var(--td-brand-color);
   border-color: var(--td-brand-color);
-  color: var(--td-text-color-anti);
+  color: var(--app-brand-foreground);
 }
 
 // Filled, borderless fields, like the option rows and argument editor of the

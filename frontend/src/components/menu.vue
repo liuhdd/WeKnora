@@ -102,9 +102,9 @@
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
                             <div class="menu_icon" :class="`menu_icon--${item.icon}`">
-                                <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'automation' ? automationIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
-                                    alt="">
+                                <span class="icon icon--themed"
+                                    :style="{ '--menu-icon-url': `url(${getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'automation' ? automationIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)})` }"
+                                    aria-hidden="true"></span>
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
                                 <span class="menu_title" :title="item.title">{{ item.title }}</span>
@@ -1538,6 +1538,13 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
             width: 18px;
             height: 18px;
             overflow: hidden;
+        }
+
+        // 遮罩保留图形并跟随主题颜色 / Masks preserve icon shapes while inheriting theme colors.
+        .icon--themed {
+            background-color: currentColor;
+            -webkit-mask: var(--menu-icon-url) center / contain no-repeat;
+            mask: var(--menu-icon-url) center / contain no-repeat;
         }
 
         // 图形几乎占满画布的图标缩小显示，否则会比其他图标大一圈

@@ -662,7 +662,7 @@ onUnmounted(() => {
   }
 
   .avatar-placeholder {
-    color: var(--td-text-color-anti);
+    color: var(--app-brand-foreground);
     font-size: var(--app-text-sm);
     font-weight: 600;
     line-height: 1;
@@ -830,7 +830,7 @@ onUnmounted(() => {
     }
 
     .dropdown-user-avatar-placeholder {
-      color: var(--td-text-color-anti);
+      color: var(--app-brand-foreground);
       font-size: var(--app-text-sm);
       font-weight: 600;
       line-height: 1;
@@ -1198,7 +1198,7 @@ onUnmounted(() => {
 
     &.is-current {
       background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
-      color: var(--td-text-color-anti);
+      color: var(--app-brand-foreground);
     }
   }
 

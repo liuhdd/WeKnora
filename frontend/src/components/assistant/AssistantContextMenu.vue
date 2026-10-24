@@ -152,6 +152,7 @@ const open = ref(false)
     background: var(--td-brand-color);
 
     &::after {
+      background: var(--app-brand-foreground);
       transform: translateX(12px);
     }
   }

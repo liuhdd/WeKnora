@@ -3697,6 +3697,11 @@ export default {
     }
   },
   theme: {
+    preset: '界面风格',
+    presetDescription: '选择界面配色，支持浅色、深色及跟随系统，即时保存',
+    weknoraDescription: '经典清新绿',
+    claudeDescription: '暖米色与陶土橙',
+    chatgptDescription: '简洁中性色',
     theme: '主题模式',
     themeDescription: '选择界面的显示主题，支持跟随系统自动切换',
     light: '浅色',

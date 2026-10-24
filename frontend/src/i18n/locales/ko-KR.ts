@@ -3695,6 +3695,11 @@ export default {
     }
   },
   theme: {
+    preset: '인터페이스 스타일',
+    presetDescription: '모든 테마 모드에 사용할 색상을 선택하세요. 변경 사항은 즉시 저장됩니다.',
+    weknoraDescription: '산뜻한 기본 그린',
+    claudeDescription: '따뜻한 아이보리와 테라코타',
+    chatgptDescription: '깔끔한 중성 색상',
     theme: '테마',
     themeDescription: '인터페이스의 표시 테마를 선택하세요. 시스템 설정에 따라 자동 전환을 지원합니다',
     light: '라이트',

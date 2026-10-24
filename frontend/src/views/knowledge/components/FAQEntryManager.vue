@@ -4434,7 +4434,7 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
-  color: var(--td-text-color-anti);
+  color: var(--app-brand-foreground);
   border-radius: var(--app-radius-xs);
   font-family: var(--app-font-family);
   font-size: var(--app-text-sm);
@@ -4567,7 +4567,7 @@ watch(() => entries.value.map(e => ({
     background: var(--td-brand-color) !important;
     border: 1px solid var(--td-brand-color) !important;
     border-radius: var(--app-radius-md) !important;
-    color: var(--td-text-color-anti) !important;
+    color: var(--app-brand-foreground) !important;
     display: flex;
     align-items: center;
     justify-content: center;

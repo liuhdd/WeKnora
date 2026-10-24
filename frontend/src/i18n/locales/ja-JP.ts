@@ -5474,6 +5474,11 @@ export default {
       close: '設定を閉じる'
     },
     theme: {
+      preset: 'インターフェースのスタイル',
+      presetDescription: '配色を選択します。どのテーマモードでも使用でき、変更はすぐに保存されます。',
+      weknoraDescription: '爽やかな定番グリーン',
+      claudeDescription: '温かなアイボリーとテラコッタ',
+      chatgptDescription: 'すっきりしたニュートラルカラー',
       theme: 'テーマ',
       themeDescription: 'インターフェースの表示テーマを選択します。システム設定に合わせた自動切り替えにも対応しています',
       light: 'ライト',

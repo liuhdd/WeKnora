@@ -5474,6 +5474,11 @@ export default {
       close: 'Close Settings'
     },
     theme: {
+      preset: 'Interface style',
+      presetDescription: 'Choose a color palette for any theme mode. Changes are saved instantly.',
+      weknoraDescription: 'Classic fresh green',
+      claudeDescription: 'Warm ivory and terracotta',
+      chatgptDescription: 'Clean neutral tones',
       theme: 'Theme',
       themeDescription: 'Choose the display theme for the interface, supports automatic switching with system settings',
       light: 'Light',

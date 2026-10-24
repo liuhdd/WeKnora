@@ -2180,7 +2180,7 @@ const drawerConfirmText = computed(() => {
 
 .ds-step.active .ds-step-num {
   background: var(--td-brand-color);
-  color: #fff;
+  color: var(--app-brand-foreground);
   border-color: var(--td-brand-color);
 }
 

@@ -16,6 +16,7 @@
 
 const PREFERENCE_SUFFIXES = [
   'theme',
+  'theme_preset',
   'font_sans',
   'font_mono',
   'font_size',

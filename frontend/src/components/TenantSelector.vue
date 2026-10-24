@@ -526,7 +526,7 @@ onUnmounted(() => {
 
   &.active {
     background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
-    color: var(--td-text-color-anti);
+    color: var(--app-brand-foreground);
   }
 }
 

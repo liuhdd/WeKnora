@@ -2117,7 +2117,7 @@ onUnmounted(() => {
   .is-active & {
     background: var(--td-brand-color);
     border-color: var(--td-brand-color);
-    color: #fff;
+    color: var(--app-brand-foreground);
   }
 
   .is-done & {

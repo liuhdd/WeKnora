@@ -207,6 +207,8 @@ select:-webkit-autofill {
     --app-selection-text: var(--td-text-color-primary);
     --app-selection-border: color-mix(in srgb, var(--td-brand-color) 30%, var(--td-component-stroke));
     --app-focus-border: var(--td-brand-color);
+    /* 品牌底色上的前景独立于状态色。 / Brand surface foreground is independent of status colors. */
+    --app-brand-foreground: #ffffff;
 }
 
 /* 应用级强调色：智能体 / 图谱等「非品牌但反复出现」的语义色，透明叠加请用 color-mix */
@@ -295,4 +297,154 @@ select:-webkit-autofill {
     --z-drawer: 2500;
     --z-popover: 3000;
     --z-toast: 5000;
+}
+
+/* 配色预设独立于明暗模式；语义状态色沿用原定义。 / Color presets are independent of light/dark mode; status colors retain their semantics. */
+:root:root[data-theme-preset="claude"],
+:root:root[data-theme-preset="chatgpt"] {
+    --brand-main: var(--td-brand-color);
+    --td-brand-color-light: var(--td-brand-color-1);
+    --td-brand-color-focus: color-mix(in srgb, var(--td-brand-color) 20%, transparent);
+    --td-brand-color-disabled: var(--td-brand-color-3);
+    --td-brand-color-hover: var(--td-brand-color-5);
+    --td-brand-color: var(--td-brand-color-6);
+    --td-brand-color-active: var(--td-brand-color-7);
+    --td-text-color-brand: var(--td-brand-color);
+    --td-text-color-link: var(--td-brand-color);
+    --td-text-color-primary: var(--td-font-gray-1);
+    --td-text-color-secondary: var(--td-font-gray-2);
+    --td-text-color-placeholder: var(--td-font-gray-3);
+    --td-text-color-disabled: var(--td-font-gray-4);
+    --td-bg-color-container-select: var(--td-bg-color-container);
+    --td-bg-color-component-disabled: var(--td-bg-color-secondarycontainer);
+}
+
+/* Claude：暖纸色与陶土色强调。 / Claude: warm paper surfaces and terracotta accents. */
+:root:root[data-theme-preset="claude"] {
+    --td-brand-color-1: #f4e8e0;
+    --td-brand-color-2: #ead1c3;
+    --td-brand-color-3: #dcae97;
+    --td-brand-color-4: #ce8968;
+    --td-brand-color-5: #b25d40;
+    --td-brand-color-6: #ae563b;
+    --td-brand-color-7: #91432e;
+    --td-brand-color-8: #753625;
+    --td-brand-color-9: #5b2b20;
+    --td-brand-color-10: #432118;
+    --td-bg-color-page: #f7f5ef;
+    --td-bg-color-sidebar: #eceae2;
+    --td-bg-color-settings-modal: #f2f0e8;
+    --td-bg-color-container: #fffdf8;
+    --td-bg-color-container-hover: #efede5;
+    --td-bg-color-container-active: #e7e3d9;
+    --td-bg-color-secondarycontainer: #f0eee6;
+    --td-bg-color-secondarycontainer-hover: #e7e3d9;
+    --td-bg-color-secondarycontainer-active: #dcd7ca;
+    --td-bg-color-component: #e7e3d9;
+    --td-bg-color-component-hover: #dcd7ca;
+    --td-bg-color-component-active: #c8c0b0;
+    --td-component-stroke: #e3dfd4;
+    --td-component-border: #cec7b9;
+    --td-font-gray-1: #302d27;
+    --td-font-gray-2: #6a655b;
+    --td-font-gray-3: #817a6d;
+    --td-font-gray-4: #aaa294;
+    --app-brand-foreground: #ffffff;
+}
+
+:root:root[data-theme-preset="claude"][theme-mode="dark"] {
+    --td-brand-color-1: #3e2d25;
+    --td-brand-color-2: #593a2e;
+    --td-brand-color-3: #79513d;
+    --td-brand-color-4: #a3694e;
+    --td-brand-color-5: #e7af92;
+    --td-brand-color-6: #dd9a7d;
+    --td-brand-color-7: #ce8566;
+    --td-brand-color-8: #edc1a9;
+    --td-brand-color-9: #f3d9c8;
+    --td-brand-color-10: #f9eee3;
+    --td-bg-color-page: #262624;
+    --td-bg-color-sidebar: #20201e;
+    --td-bg-color-settings-modal: #252521;
+    --td-bg-color-container: #30302b;
+    --td-bg-color-container-hover: #393931;
+    --td-bg-color-container-active: #45443b;
+    --td-bg-color-secondarycontainer: #35352e;
+    --td-bg-color-secondarycontainer-hover: #404036;
+    --td-bg-color-secondarycontainer-active: #4c4b40;
+    --td-bg-color-component: #424137;
+    --td-bg-color-component-hover: #504e42;
+    --td-bg-color-component-active: #605c4d;
+    --td-component-stroke: #444238;
+    --td-component-border: #625d4f;
+    --td-font-gray-1: #eeeae0;
+    --td-font-gray-2: #c0bbae;
+    --td-font-gray-3: #a49d8f;
+    --td-font-gray-4: #746f62;
+    --app-brand-foreground: #2b211a;
+}
+
+/* ChatGPT：中性表面与黑白强调。 / ChatGPT: neutral surfaces with monochrome accents. */
+:root:root[data-theme-preset="chatgpt"] {
+    --td-brand-color-1: #f0f0f0;
+    --td-brand-color-2: #dedede;
+    --td-brand-color-3: #b4b4b4;
+    --td-brand-color-4: #8f8f8f;
+    --td-brand-color-5: #424242;
+    --td-brand-color-6: #212121;
+    --td-brand-color-7: #0d0d0d;
+    --td-brand-color-8: #080808;
+    --td-brand-color-9: #050505;
+    --td-brand-color-10: #000000;
+    --td-bg-color-page: #ffffff;
+    --td-bg-color-sidebar: #f9f9f9;
+    --td-bg-color-settings-modal: #f9f9f9;
+    --td-bg-color-container: #ffffff;
+    --td-bg-color-container-hover: #f5f5f5;
+    --td-bg-color-container-active: #ebebeb;
+    --td-bg-color-secondarycontainer: #f5f5f5;
+    --td-bg-color-secondarycontainer-hover: #ebebeb;
+    --td-bg-color-secondarycontainer-active: #dedede;
+    --td-bg-color-component: #ebebeb;
+    --td-bg-color-component-hover: #dedede;
+    --td-bg-color-component-active: #c4c4c4;
+    --td-component-stroke: #e5e5e5;
+    --td-component-border: #cecece;
+    --td-font-gray-1: #0d0d0d;
+    --td-font-gray-2: #5d5d5d;
+    --td-font-gray-3: #757575;
+    --td-font-gray-4: #b4b4b4;
+    --app-brand-foreground: #ffffff;
+}
+
+:root:root[data-theme-preset="chatgpt"][theme-mode="dark"] {
+    --td-brand-color-1: #353535;
+    --td-brand-color-2: #444444;
+    --td-brand-color-3: #676767;
+    --td-brand-color-4: #b4b4b4;
+    --td-brand-color-5: #ffffff;
+    --td-brand-color-6: #ececec;
+    --td-brand-color-7: #d4d4d4;
+    --td-brand-color-8: #f5f5f5;
+    --td-brand-color-9: #fafafa;
+    --td-brand-color-10: #ffffff;
+    --td-bg-color-page: #212121;
+    --td-bg-color-sidebar: #171717;
+    --td-bg-color-settings-modal: #212121;
+    --td-bg-color-container: #212121;
+    --td-bg-color-container-hover: #2f2f2f;
+    --td-bg-color-container-active: #3b3b3b;
+    --td-bg-color-secondarycontainer: #2f2f2f;
+    --td-bg-color-secondarycontainer-hover: #3b3b3b;
+    --td-bg-color-secondarycontainer-active: #454545;
+    --td-bg-color-component: #3b3b3b;
+    --td-bg-color-component-hover: #454545;
+    --td-bg-color-component-active: #565656;
+    --td-component-stroke: #383838;
+    --td-component-border: #565656;
+    --td-font-gray-1: #ececec;
+    --td-font-gray-2: #b4b4b4;
+    --td-font-gray-3: #a0a0a0;
+    --td-font-gray-4: #676767;
+    --app-brand-foreground: #171717;
 }

@@ -68,3 +68,26 @@
 .t-select-option.t-is-selected:not(.t-is-disabled):not(:has(.t-checkbox)) {
   gap: 8px;
 }
+
+// 品牌底色使用独立前景，避免影响危险/成功等状态色。 / Scope brand foreground to brand surfaces, preserving danger/success contrast.
+.t-button--variant-base.t-button--theme-primary,
+.t-checkbox.t-is-checked .t-checkbox__input,
+.t-radio-group .t-radio-button.t-is-checked,
+.t-switch.t-is-checked,
+.t-tag--primary:not(.t-tag--outline):not(.t-tag--light):not(.t-tag--light-outline),
+.t-pagination__number,
+.t-steps-item--process .t-steps-item__icon--number,
+.t-date-picker__cell--active .t-date-picker__cell-inner,
+.t-date-picker__table-week-row--active .t-date-picker__cell-inner,
+.t-calendar--card .t-is-checked .t-calendar__table-body-cell-display,
+.t-menu--dark .t-menu__item.t-is-active:not(.t-is-opened),
+.t-menu--dark.t-is-collapsed .t-menu__item.t-is-active,
+.t-progress:not(.t-progress--status--success):not(.t-progress--status--warning):not(.t-progress--status--error) {
+  --td-text-color-anti: var(--app-brand-foreground);
+}
+
+// TDesign 的旋钮与半选标记使用固定白色，需要随品牌底色调整。 / TDesign's fixed-white switch handle and indeterminate mark must follow brand contrast.
+.t-switch.t-is-checked .t-switch__handle::before,
+.t-checkbox.t-is-indeterminate:not(.t-is-disabled) .t-checkbox__input::after {
+  background-color: var(--app-brand-foreground);
+}
