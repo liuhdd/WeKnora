@@ -28,9 +28,7 @@ func (n *NDCGMetric) Compute(metricInput *types.MetricInput) float64 {
 
 	// Create set of relevant documents and count total relevant
 	gtSets := make(map[int]struct{}, len(gts))
-	countGt := 0
 	for _, gt := range gts {
-		countGt += len(gt)
 		for _, g := range gt {
 			gtSets[g] = struct{}{}
 		}
@@ -52,21 +50,11 @@ func (n *NDCGMetric) Compute(metricInput *types.MetricInput) float64 {
 		dcg += (math.Pow(2, float64(relevanceScores[docID])) - 1) / math.Log2(float64(i+2))
 	}
 
-	// Create ideal ranking (all relevant docs first)
-	idealLen := min(countGt, len(ids))
-	idealPred := make([]int, len(ids))
-	for i := 0; i < len(ids); i++ {
-		if i < idealLen {
-			idealPred[i] = 1
-		} else {
-			idealPred[i] = 0
-		}
-	}
-
-	// Calculate IDCG (Ideal DCG)
+	// 理想排序取前k个相关段落，不随实际召回不足而缩短 / Ideal ranking uses up to k relevant passages, including missed results.
+	idealLen := min(len(gtSets), n.k)
 	var idcg float64
-	for i, relevance := range idealPred {
-		idcg += float64(relevance) / math.Log2(float64(i+2))
+	for i := 0; i < idealLen; i++ {
+		idcg += 1 / math.Log2(float64(i+2))
 	}
 
 	// Handle division by zero case

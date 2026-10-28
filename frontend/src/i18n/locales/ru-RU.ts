@@ -1,4 +1,7 @@
+import { evaluationMessages } from './evaluation'
+
 export default {
+  evaluation: evaluationMessages['ru-RU'],
   modelCatalog: {
     "title": "Каталог моделей",
     "description": "Каталог моделей определяет, какие модели предлагаются при добавлении модели, и значения по умолчанию, например контекстное окно и поддержку рассуждений. Изменения здесь сразу применяются ко всем рабочим пространствам.",

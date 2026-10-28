@@ -54,9 +54,9 @@ func (m *MAPMetric) Compute(metricInput *types.MetricInput) float64 {
 				ap += float64(hitCount) / float64(k+1)
 			}
 		}
-		// Normalize by number of relevant documents
-		if hitCount > 0 {
-			ap /= float64(hitCount)
+		// 除以全部相关段落，未召回的证据也影响AP / Normalize by all relevant passages, including misses.
+		if len(gtSet) > 0 {
+			ap /= float64(len(gtSet))
 		}
 		apSum += ap
 	}

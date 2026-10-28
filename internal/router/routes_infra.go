@@ -97,7 +97,16 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 	{
 		evaluationRoutes.POST("", g.Admin(), handler.Evaluation)
 		evaluationRoutes.GET("", g.Viewer(), handler.GetEvaluationResult)
+		evaluationRoutes.GET("/runs", g.Viewer(), handler.ListEvaluationRuns)
+		evaluationRoutes.GET("/datasets", g.Viewer(), handler.ListEvaluationDatasets)
+		evaluationRoutes.GET("/datasets/:id", g.Viewer(), handler.GetEvaluationDataset)
+		evaluationRoutes.GET("/datasets/:id/draft", g.Viewer(), handler.GetEvaluationDatasetDraft)
+		evaluationRoutes.GET("/datasets/:id/versions", g.Viewer(), handler.ListEvaluationDatasetVersions)
 	}
+	// 数据集维护要求完整访问权限，运行评测能力不授予写入权 / Dataset writes require full access; running evaluations grants no edit permission.
+	g.apiKeyRoute(r, http.MethodPost, "/evaluation/datasets", apiKeyFullAccess(), g.Admin(), handler.CreateEvaluationDataset)
+	g.apiKeyRoute(r, http.MethodPut, "/evaluation/datasets/:id/draft", apiKeyFullAccess(), g.Admin(), handler.SaveEvaluationDatasetDraft)
+	g.apiKeyRoute(r, http.MethodPost, "/evaluation/datasets/:id/publish", apiKeyFullAccess(), g.Admin(), handler.PublishEvaluationDataset)
 }
 
 func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.InitializationHandler, g *rbacGuards) {

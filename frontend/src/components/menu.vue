@@ -99,10 +99,12 @@
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
+                        :data-testid="item.path === 'evaluations' ? 'evaluation-nav' : undefined"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
                             <div class="menu_icon" :class="`menu_icon--${item.icon}`">
-                                <span class="icon icon--themed"
+                                <t-icon v-if="item.icon === 'evaluation'" name="chart-bar" size="18px" />
+                                <span v-else class="icon icon--themed"
                                     :style="{ '--menu-icon-url': `url(${JSON.stringify(getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'automation' ? automationIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon))})` }"
                                     aria-hidden="true"></span>
                             </div>
@@ -472,6 +474,8 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'artifactLibrary';
         case 'automations':
             return currentRoute === 'automationList';
+        case 'evaluations':
+            return currentRoute === 'evaluationWorkbench';
         case 'organizations':
             return currentRoute === 'organizationList';
         case 'creatChat':
@@ -500,7 +504,7 @@ const getIconActiveState = (itemPath: string) => {
 };
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
-const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'automations', 'toolbox', 'organizations']);
+const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'automations', 'evaluations', 'toolbox', 'organizations']);
 
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => TOP_MENU_PATHS.has(item.path));

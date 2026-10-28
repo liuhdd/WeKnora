@@ -693,6 +693,14 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	var understandStart time.Time
 	for _, eventType := range eventList {
 		stageStart := time.Now()
+		var traceInput string
+		if chatManage.PipelineTraceObserver != nil {
+			var traceErr error
+			traceInput, traceErr = snapshotPipelineState(chatManage)
+			if traceErr != nil {
+				return fmt.Errorf("capture stage %s input: %w", eventType, traceErr)
+			}
+		}
 		// Wrap each pipeline stage in a Langfuse span so the trace timeline
 		// shows the gaps between LLM/embedding/rerank generations (the work
 		// that happens between them — vector DB search, merge, filter, prompt
@@ -757,6 +765,17 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 				"duration_ms": stageDuration.Milliseconds(),
 			}, nil, spanErr)
 		}
+		if chatManage.PipelineTraceObserver != nil {
+			step, traceErr := completedPipelineStep(eventType, stageStart, traceInput, chatManage, err)
+			if traceErr != nil {
+				return traceErr
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				step.Status = "failed"
+				step.Error = ctxErr.Error()
+			}
+			chatManage.PipelineTraceObserver(step)
+		}
 
 		// If the user stopped generation, the context is cancelled. A cancelled
 		// retrieval stage surfaces as ErrSearchNothing (the search goroutines
@@ -783,7 +802,25 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 				"reason":      "search_nothing",
 				"strategy":    string(chatManage.FallbackStrategy),
 			})
+			var fallbackInput string
+			fallbackStart := time.Now()
+			if chatManage.PipelineTraceObserver != nil {
+				var traceErr error
+				fallbackInput, traceErr = snapshotPipelineState(chatManage)
+				if traceErr != nil {
+					return fmt.Errorf("capture fallback input: %w", traceErr)
+				}
+			}
 			s.handleFallbackResponse(ctx, chatManage)
+			if chatManage.PipelineTraceObserver != nil {
+				step, traceErr := completedPipelineStep(
+					types.EventType("fallback_response"), fallbackStart, fallbackInput, chatManage, nil,
+				)
+				if traceErr != nil {
+					return traceErr
+				}
+				chatManage.PipelineTraceObserver(step)
+			}
 			return nil
 		}
 

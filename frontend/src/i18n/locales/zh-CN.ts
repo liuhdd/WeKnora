@@ -1,4 +1,7 @@
+import { evaluationMessages } from './evaluation'
+
 export default {
+  evaluation: evaluationMessages['zh-CN'],
   modelCatalog: {
     "title": "模型目录",
     "description": "模型目录决定添加模型时可选的模型列表，以及上下文窗口、是否支持思考等默认参数。在这里修改后，所有空间立即生效。",

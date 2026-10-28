@@ -1,4 +1,7 @@
+import { evaluationMessages } from './evaluation'
+
 export default {
+  evaluation: evaluationMessages['en-US'],
   modelCatalog: {
     "title": "Model catalog",
     "description": "The model catalog defines which models are offered when adding a model, along with defaults such as context window and reasoning support. Changes here apply to all workspaces immediately.",

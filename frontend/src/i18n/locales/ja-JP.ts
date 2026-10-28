@@ -1,4 +1,7 @@
+import { evaluationMessages } from './evaluation'
+
 export default {
+  evaluation: evaluationMessages['ja-JP'],
   modelCatalog: {
     "title": "モデルカタログ",
     "description": "モデルカタログは、モデル追加時に選べるモデル一覧と、コンテキスト長や思考対応などの既定値を定義します。ここでの変更はすべてのワークスペースに即時反映されます。",

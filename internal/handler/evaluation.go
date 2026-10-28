@@ -14,16 +14,18 @@ import (
 // EvaluationHandler handles evaluation related HTTP requests
 type EvaluationHandler struct {
 	evaluationService interfaces.EvaluationService // Service for evaluation operations
+	datasetService    interfaces.DatasetService
 }
 
 // NewEvaluationHandler creates a new EvaluationHandler instance
-func NewEvaluationHandler(evaluationService interfaces.EvaluationService) *EvaluationHandler {
-	return &EvaluationHandler{evaluationService: evaluationService}
+func NewEvaluationHandler(evaluationService interfaces.EvaluationService, datasetService interfaces.DatasetService) *EvaluationHandler {
+	return &EvaluationHandler{evaluationService: evaluationService, datasetService: datasetService}
 }
 
 // EvaluationRequest contains parameters for evaluation request
 type EvaluationRequest struct {
-	DatasetID       string `json:"dataset_id"`        // ID of dataset to evaluate
+	DatasetID       string `json:"dataset_id"` // ID of dataset to evaluate
+	DatasetVersion  string `json:"dataset_version"`
 	KnowledgeBaseID string `json:"knowledge_base_id"` // ID of knowledge base to use
 	ChatModelID     string `json:"chat_id"`           // ID of chat model to use
 	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
@@ -69,14 +71,15 @@ func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 	)
 
 	task, err := e.evaluationService.Evaluation(ctx,
-		secutils.SanitizeForLog(request.DatasetID),
-		secutils.SanitizeForLog(request.KnowledgeBaseID),
-		secutils.SanitizeForLog(request.ChatModelID),
-		secutils.SanitizeForLog(request.RerankModelID),
+		request.DatasetID,
+		request.DatasetVersion,
+		request.KnowledgeBaseID,
+		request.ChatModelID,
+		request.RerankModelID,
 	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(err)
 		return
 	}
 
@@ -116,10 +119,10 @@ func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 		return
 	}
 
-	result, err := e.evaluationService.EvaluationResult(ctx, secutils.SanitizeForLog(request.TaskID))
+	result, err := e.evaluationService.EvaluationResult(ctx, request.TaskID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(err)
 		return
 	}
 
@@ -128,4 +131,42 @@ func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
+}
+
+// ListEvaluationRuns 返回分页历史 / Returns paginated evaluation history.
+func (e *EvaluationHandler) ListEvaluationRuns(c *gin.Context) {
+	request := struct {
+		Page     int `form:"page" binding:"min=1,max=100000"`
+		PageSize int `form:"page_size" binding:"min=1,max=100"`
+	}{Page: 1, PageSize: 20}
+	if err := c.ShouldBindQuery(&request); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid evaluation history pagination").WithDetails(err.Error()))
+		return
+	}
+	page, err := e.evaluationService.ListEvaluationRuns(c.Request.Context(), request.Page, request.PageSize)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
+}
+
+// ListEvaluationDatasets 返回可用数据集 / Returns available evaluation datasets.
+func (e *EvaluationHandler) ListEvaluationDatasets(c *gin.Context) {
+	datasets, err := e.evaluationService.ListEvaluationDatasets(c.Request.Context())
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": datasets})
+}
+
+// GetEvaluationDataset 返回题目、参考答案和证据 / Returns questions, reference answers and evidence.
+func (e *EvaluationHandler) GetEvaluationDataset(c *gin.Context) {
+	dataset, err := e.evaluationService.GetEvaluationDatasetVersion(c.Request.Context(), c.Param("id"), c.Query("version"))
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": dataset})
 }

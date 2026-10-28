@@ -1,4 +1,7 @@
+import { evaluationMessages } from './evaluation'
+
 export default {
+  evaluation: evaluationMessages['zh-TW'],
   modelCatalog: {
     "title": "模型目錄",
     "description": "模型目錄決定新增模型時可選的模型清單，以及脈絡視窗、是否支持思考等預設參數。在這裡修改後，所有空間立即生效。",

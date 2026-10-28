@@ -202,16 +202,16 @@
             <t-form ref="formRef" :data="formData" :rules="formRules" @submit="handleLogin" layout="vertical"
               label-align="top">
               <t-form-item :label="$t('auth.email')" name="email">
-                <t-input v-model="formData.email" :placeholder="$t('auth.emailPlaceholder')" type="text"
+                <t-input v-model="formData.email" data-testid="auth-login-email" :placeholder="$t('auth.emailPlaceholder')" type="text"
                   autocomplete="email" size="large" :disabled="loading" />
               </t-form-item>
 
               <t-form-item :label="$t('auth.password')" name="password">
-                <t-input v-model="formData.password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
+                <t-input v-model="formData.password" data-testid="auth-login-password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
                   autocomplete="current-password" size="large" :disabled="loading" @enter="handleLogin" />
               </t-form-item>
 
-              <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
+              <t-button type="submit" data-testid="auth-login-submit" theme="primary" size="large" block :loading="loading" class="submit-button">
                 {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
               </t-button>
 
@@ -219,7 +219,7 @@
                 <div class="register-cta__divider">
                   <span>{{ $t('auth.firstTime') }}</span>
                 </div>
-                <t-button theme="default" variant="outline" size="large" block class="register-cta__button"
+                <t-button theme="default" data-testid="auth-switch-register" variant="outline" size="large" block class="register-cta__button"
                   :disabled="loading" @click="toggleMode">
                   {{ $t('auth.createAccount') }}
                 </t-button>
@@ -282,34 +282,34 @@
             <t-form ref="registerFormRef" :data="registerData" :rules="registerRules" @submit="handleRegister"
               layout="vertical" label-align="top">
               <t-form-item :label="$t('auth.username')" name="username">
-                <t-input v-model="registerData.username" :placeholder="$t('auth.usernamePlaceholder')" size="large"
+                <t-input v-model="registerData.username" data-testid="auth-register-username" :placeholder="$t('auth.usernamePlaceholder')" size="large"
                   :disabled="loading" />
               </t-form-item>
 
               <t-form-item :label="$t('auth.email')" name="email">
-                <t-input v-model="registerData.email" :placeholder="$t('auth.emailPlaceholder')" type="text"
+                <t-input v-model="registerData.email" data-testid="auth-register-email" :placeholder="$t('auth.emailPlaceholder')" type="text"
                   autocomplete="email" size="large" :disabled="loading" />
               </t-form-item>
 
               <t-form-item :label="$t('auth.password')" name="password">
-                <t-input v-model="registerData.password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
+                <t-input v-model="registerData.password" data-testid="auth-register-password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
                   autocomplete="new-password" size="large" :disabled="loading" />
               </t-form-item>
 
               <t-form-item :label="$t('auth.confirmPassword')" name="confirmPassword">
-                <t-input v-model="registerData.confirmPassword" :placeholder="$t('auth.confirmPasswordPlaceholder')"
+                <t-input v-model="registerData.confirmPassword" data-testid="auth-register-confirm-password" :placeholder="$t('auth.confirmPasswordPlaceholder')"
                   type="password" autocomplete="new-password" size="large" :disabled="loading"
                   @enter="handleRegister" />
               </t-form-item>
 
-              <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
+              <t-button type="submit" data-testid="auth-register-submit" theme="primary" size="large" block :loading="loading" class="submit-button">
                 {{ loading ? $t('auth.registering') : $t('auth.register') }}
               </t-button>
             </t-form>
 
             <div class="form-footer">
               <span>{{ $t('auth.haveAccount') }}</span>
-              <a href="#" @click.prevent="toggleMode" class="link-button">
+              <a href="#" data-testid="auth-switch-login" @click.prevent="toggleMode" class="link-button">
                 {{ $t('auth.backToLogin') }}
               </a>
             </div>

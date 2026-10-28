@@ -2,8 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -12,11 +17,13 @@ import (
 )
 
 // DatasetService provides operations for working with datasets
-type DatasetService struct{}
+type DatasetService struct {
+	repository interfaces.EvaluationDatasetRepository
+}
 
 // NewDatasetService creates a new DatasetService instance
-func NewDatasetService() interfaces.DatasetService {
-	return &DatasetService{}
+func NewDatasetService(repository interfaces.EvaluationDatasetRepository) interfaces.DatasetService {
+	return &DatasetService{repository: repository}
 }
 
 // TextInfo represents text data with ID in parquet format
@@ -42,36 +49,45 @@ func (d *DatasetService) GetDatasetByID(ctx context.Context, datasetID string) (
 	logger.Info(ctx, "Start getting dataset by ID")
 	logger.Infof(ctx, "Getting dataset with ID: %s", datasetID)
 
-	dataset := DefaultDataset()
-	dataset.PrintStats(ctx)
-	qaPairs := dataset.Iterate()
+	snapshot, err := d.GetEvaluationDataset(ctx, datasetID)
+	if err != nil {
+		return nil, err
+	}
+	qaPairs := make([]*types.QAPair, 0, len(snapshot.Items))
+	for _, item := range snapshot.Items {
+		qaPairs = append(qaPairs, &types.QAPair{QID: item.QID, Question: item.Question, Answer: item.Answer, PIDs: item.PIDs, Passages: item.Passages})
+	}
 
 	logger.Infof(ctx, "Retrieved %d QA pairs from dataset", len(qaPairs))
 	return qaPairs, nil
 }
 
 // DefaultDataset loads and initializes the default dataset from parquet files
-func DefaultDataset() dataset {
-	datasetDir := "./dataset/samples"
+func DefaultDataset() (dataset, error) {
+	return loadEvaluationDataset("./dataset/samples")
+}
+
+// loadEvaluationDataset 显式报告文件及关联错误 / Reports file and relationship errors explicitly.
+func loadEvaluationDataset(datasetDir string) (dataset, error) {
 	queries, err := loadParquet[TextInfo](fmt.Sprintf("%s/queries.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation queries from %s: %w", datasetDir, err)
 	}
 	corpus, err := loadParquet[TextInfo](fmt.Sprintf("%s/corpus.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation corpus from %s: %w", datasetDir, err)
 	}
 	answers, err := loadParquet[TextInfo](fmt.Sprintf("%s/answers.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation answers from %s: %w", datasetDir, err)
 	}
 	qrels, err := loadParquet[RelsInfo](fmt.Sprintf("%s/qrels.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation relevance labels from %s: %w", datasetDir, err)
 	}
 	qas, err := loadParquet[QaInfo](fmt.Sprintf("%s/qas.parquet", datasetDir))
 	if err != nil {
-		panic(err)
+		return dataset{}, fmt.Errorf("load evaluation answer mappings from %s: %w", datasetDir, err)
 	}
 
 	res := dataset{
@@ -82,21 +98,91 @@ func DefaultDataset() dataset {
 		qas:     make(map[int64]int64),   // qid -> aid
 	}
 	for _, qi := range queries {
+		if _, exists := res.queries[qi.ID]; exists {
+			return dataset{}, fmt.Errorf("duplicate evaluation question ID %d", qi.ID)
+		}
+		if strings.TrimSpace(qi.Text) == "" {
+			return dataset{}, fmt.Errorf("evaluation question %d is empty", qi.ID)
+		}
 		res.queries[qi.ID] = qi.Text
 	}
 	for _, ci := range corpus {
+		if ci.ID < 0 {
+			return dataset{}, fmt.Errorf("evaluation passage ID %d must be nonnegative", ci.ID)
+		}
+		if _, exists := res.corpus[ci.ID]; exists {
+			return dataset{}, fmt.Errorf("duplicate evaluation passage ID %d", ci.ID)
+		}
+		if strings.TrimSpace(ci.Text) == "" {
+			return dataset{}, fmt.Errorf("evaluation passage %d is empty", ci.ID)
+		}
 		res.corpus[ci.ID] = ci.Text
 	}
 	for _, ai := range answers {
+		if _, exists := res.answers[ai.ID]; exists {
+			return dataset{}, fmt.Errorf("duplicate evaluation answer ID %d", ai.ID)
+		}
 		res.answers[ai.ID] = ai.Text
 	}
 	for _, ri := range qrels {
+		if _, exists := res.queries[ri.QID]; !exists {
+			return dataset{}, fmt.Errorf("relevance label references missing question %d", ri.QID)
+		}
+		if _, exists := res.corpus[ri.PID]; !exists {
+			return dataset{}, fmt.Errorf("question %d references missing passage %d", ri.QID, ri.PID)
+		}
+		for _, existing := range res.qrels[ri.QID] {
+			if existing == ri.PID {
+				return dataset{}, fmt.Errorf("question %d repeats relevance label for passage %d", ri.QID, ri.PID)
+			}
+		}
 		res.qrels[ri.QID] = append(res.qrels[ri.QID], ri.PID)
 	}
 	for _, qi := range qas {
+		if _, exists := res.queries[qi.QID]; !exists {
+			return dataset{}, fmt.Errorf("answer mapping references missing question %d", qi.QID)
+		}
+		if _, exists := res.answers[qi.AID]; !exists {
+			return dataset{}, fmt.Errorf("question %d references missing answer %d", qi.QID, qi.AID)
+		}
+		if _, exists := res.qas[qi.QID]; exists {
+			return dataset{}, fmt.Errorf("question %d has multiple answer mappings; one reference answer is supported", qi.QID)
+		}
 		res.qas[qi.QID] = qi.AID
 	}
-	return res
+	if len(res.queries) == 0 {
+		return dataset{}, fmt.Errorf("evaluation dataset contains no questions")
+	}
+	return res, nil
+}
+
+// GetEvaluationDataset 返回排序和版本固定的题目快照 / Returns a sorted, versioned question snapshot.
+func (d *DatasetService) GetEvaluationDataset(ctx context.Context, datasetID string) (*types.EvaluationDataset, error) {
+	return d.GetEvaluationDatasetVersion(ctx, datasetID, "")
+}
+
+func evaluationDatasetSnapshot(data dataset) (*types.EvaluationDataset, error) {
+	items := make([]types.EvaluationDatasetItem, 0, len(data.queries))
+	for _, pair := range data.Iterate() {
+		items = append(items, types.EvaluationDatasetItem{QID: pair.QID, Question: pair.Question, Answer: pair.Answer, PIDs: pair.PIDs, Passages: pair.Passages})
+	}
+	corpus := make([]types.EvaluationPassage, 0, len(data.corpus))
+	for id, text := range data.corpus {
+		corpus = append(corpus, types.EvaluationPassage{ID: int(id), Text: text})
+	}
+	sort.Slice(corpus, func(i, j int) bool { return corpus[i].ID < corpus[j].ID })
+	payload, err := json.Marshal(struct {
+		Items  []types.EvaluationDatasetItem `json:"items"`
+		Corpus []types.EvaluationPassage     `json:"corpus"`
+	}{Items: items, Corpus: corpus})
+	if err != nil {
+		return nil, fmt.Errorf("encode evaluation dataset version: %w", err)
+	}
+	hash := sha256.Sum256(payload)
+	return &types.EvaluationDataset{
+		EvaluationDatasetSummary: types.EvaluationDatasetSummary{ID: "default", Name: "Default", Version: hex.EncodeToString(hash[:]), Total: len(items), ReadOnly: true, PublishedVersion: hex.EncodeToString(hash[:]), Description: "Built-in Parquet evaluation dataset"},
+		Items:                    items, Corpus: corpus,
+	}, nil
 }
 
 // dataset represents the in-memory dataset structure
@@ -110,7 +196,7 @@ type dataset struct {
 
 // Iterate generates QA pairs from the dataset
 func (d *dataset) Iterate() []*types.QAPair {
-	var pairs []*types.QAPair
+	pairs := make([]*types.QAPair, 0, len(d.queries))
 
 	for qid, question := range d.queries {
 		// Get answer info
@@ -122,11 +208,11 @@ func (d *dataset) Iterate() []*types.QAPair {
 
 		// Get related passages
 		pids := d.qrels[qid]
-		var pidStr []int
+		pidStr := make([]int, 0, len(pids))
 		for _, pid := range pids {
 			pidStr = append(pidStr, int(pid))
 		}
-		var passages []string
+		passages := make([]string, 0, len(pids))
 		for _, pid := range pids {
 			passages = append(passages, d.corpus[pid])
 		}
@@ -141,6 +227,7 @@ func (d *dataset) Iterate() []*types.QAPair {
 		})
 	}
 
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].QID < pairs[j].QID })
 	return pairs
 }
 

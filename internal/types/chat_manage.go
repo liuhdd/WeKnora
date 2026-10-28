@@ -225,6 +225,9 @@ type PipelineContext struct {
 	EventBus      EventBusInterface `json:"-"`
 	MessageID     string            `json:"-"`
 	UserMessageID string            `json:"-"`
+	// 阶段观察器仅属于当前执行，不随 Clone 复制。
+	// The stage observer belongs to one execution and is not copied by Clone.
+	PipelineTraceObserver func(PipelineTraceStep) `json:"-"`
 }
 
 // ChatManage represents the full configuration, state and runtime context

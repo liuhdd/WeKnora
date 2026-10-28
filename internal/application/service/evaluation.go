@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -16,24 +17,16 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-/*
-corpus: pid -> content
-queries: qid -> content
-answers: aid -> content
-qrels: qid -> pid
-arels: qid -> aid
-*/
-
-// EvaluationService handles evaluation tasks for knowledge base and chat models
+// EvaluationService 执行评测并保存可追溯的快照 / Executes evaluations and persists auditable snapshots.
 type EvaluationService struct {
-	config               *config.Config                  // Application configuration
-	dataset              interfaces.DatasetService       // Service for dataset operations
-	knowledgeBaseService interfaces.KnowledgeBaseService // Service for knowledge base operations
-	knowledgeService     interfaces.KnowledgeService     // Service for knowledge operations
-	sessionService       interfaces.SessionService       // Service for chat sessions
-	modelService         interfaces.ModelService         // Service for model operations
-
-	evaluationMemoryStorage *evaluationMemoryStorage // In-memory storage for evaluation tasks
+	config               *config.Config
+	dataset              interfaces.DatasetService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	sessionService       interfaces.SessionService
+	modelService         interfaces.ModelService
+	repository           interfaces.EvaluationRepository
+	updateMu             sync.Mutex
 }
 
 func NewEvaluationService(
@@ -43,437 +36,401 @@ func NewEvaluationService(
 	knowledgeService interfaces.KnowledgeService,
 	sessionService interfaces.SessionService,
 	modelService interfaces.ModelService,
+	repository interfaces.EvaluationRepository,
 ) interfaces.EvaluationService {
-	evaluationMemoryStorage := newEvaluationMemoryStorage()
 	return &EvaluationService{
-		config:                  config,
-		dataset:                 dataset,
-		knowledgeBaseService:    knowledgeBaseService,
-		knowledgeService:        knowledgeService,
-		sessionService:          sessionService,
-		modelService:            modelService,
-		evaluationMemoryStorage: evaluationMemoryStorage,
+		config: config, dataset: dataset, knowledgeBaseService: knowledgeBaseService,
+		knowledgeService: knowledgeService, sessionService: sessionService,
+		modelService: modelService, repository: repository,
 	}
 }
 
-// evaluationMemoryStorage stores evaluation tasks in memory with thread-safe access
-type evaluationMemoryStorage struct {
-	store map[string]*types.EvaluationDetail // Map of taskID to evaluation details
-	mu    *sync.RWMutex                      // Read-write lock for concurrent access
-}
-
-func newEvaluationMemoryStorage() *evaluationMemoryStorage {
-	res := &evaluationMemoryStorage{
-		store: make(map[string]*types.EvaluationDetail),
-		mu:    &sync.RWMutex{},
+// authorizeEvaluationWorkspace 拒绝知识库受限密钥访问空间级评测 / Rejects KB-restricted keys for workspace-wide evaluation.
+func authorizeEvaluationWorkspace(ctx context.Context) error {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.IsKnowledgeBaseRestricted() {
+		return apperrors.NewForbiddenError("Workspace-wide evaluation requires an API key without knowledge-base restrictions")
 	}
-	return res
-}
-
-func (e *evaluationMemoryStorage) register(params *types.EvaluationDetail) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	logger.Infof(context.Background(), "Registering evaluation task: %s", params.Task.ID)
-	e.store[params.Task.ID] = params
-}
-
-func (e *evaluationMemoryStorage) get(taskID string) (*types.EvaluationDetail, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	logger.Infof(context.Background(), "Getting evaluation task: %s", taskID)
-	res, ok := e.store[taskID]
-	if !ok {
-		return nil, errors.New("task not found")
-	}
-	return res, nil
-}
-
-func (e *evaluationMemoryStorage) update(taskID string, fn func(params *types.EvaluationDetail)) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	params, ok := e.store[taskID]
-	if !ok {
-		return errors.New("task not found")
-	}
-	fn(params)
 	return nil
 }
 
 func (e *EvaluationService) EvaluationResult(ctx context.Context, taskID string) (*types.EvaluationDetail, error) {
-	logger.Info(ctx, "Start getting evaluation result")
-	logger.Infof(ctx, "Task ID: %s", taskID)
+	if err := authorizeEvaluationWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	return e.repository.Get(ctx, types.MustTenantIDFromContext(ctx), taskID)
+}
 
-	detail, err := e.evaluationMemoryStorage.get(taskID)
+func (e *EvaluationService) ListEvaluationRuns(ctx context.Context, page int, pageSize int) (*types.EvaluationRunPage, error) {
+	if err := authorizeEvaluationWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	return e.repository.List(ctx, types.MustTenantIDFromContext(ctx), page, pageSize)
+}
+
+func (e *EvaluationService) GetEvaluationDataset(ctx context.Context, datasetID string) (*types.EvaluationDataset, error) {
+	if err := authorizeEvaluationWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	return e.dataset.GetEvaluationDataset(ctx, datasetID)
+}
+
+func (e *EvaluationService) ListEvaluationDatasets(ctx context.Context) ([]types.EvaluationDatasetSummary, error) {
+	return e.dataset.ListEvaluationDatasets(ctx)
+}
+
+func (e *EvaluationService) GetEvaluationDatasetVersion(ctx context.Context, datasetID string, version string) (*types.EvaluationDataset, error) {
+	return e.dataset.GetEvaluationDatasetVersion(ctx, datasetID, version)
+}
+
+// Evaluation 在异步执行前固定题目及参数 / Freezes questions and configuration before asynchronous execution.
+func (e *EvaluationService) Evaluation(ctx context.Context, datasetID string, datasetVersion string, knowledgeBaseID string, chatModelID string, rerankModelID string) (*types.EvaluationDetail, error) {
+	if err := authorizeEvaluationWorkspace(ctx); err != nil {
+		return nil, err
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	if datasetID == "" {
+		datasetID = "default"
+	}
+	snapshot, err := e.dataset.GetEvaluationDatasetVersion(ctx, datasetID, datasetVersion)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get evaluation task: %v", err)
+		return nil, err
+	}
+	for _, item := range snapshot.Items {
+		if item.Answer == "" || len(item.PIDs) == 0 {
+			return nil, apperrors.NewBadRequestError(fmt.Sprintf("Question %d requires a reference answer and evidence passages; abstention scoring is not supported", item.QID))
+		}
+	}
+	models, err := e.modelService.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list models for evaluation: %w", err)
+	}
+	chatModelID, err = resolveEvaluationModel(models, types.ModelTypeKnowledgeQA, chatModelID)
+	if err != nil {
+		return nil, err
+	}
+	if chatModelID == "" {
+		return nil, apperrors.NewBadRequestError("Evaluation requires a configured chat model")
+	}
+	rerankModelID, err = resolveEvaluationModel(models, types.ModelTypeRerank, rerankModelID)
+	if err != nil {
 		return nil, err
 	}
 
-	tenantID := types.MustTenantIDFromContext(ctx)
-	logger.Infof(
-		ctx,
-		"Checking tenant ID match, task tenant ID: %d, current tenant ID: %d",
-		detail.Task.TenantID, tenantID,
-	)
-
-	if tenantID != detail.Task.TenantID {
-		logger.Error(ctx, "Tenant ID mismatch")
-		return nil, errors.New("tenant ID does not match")
-	}
-
-	logger.Info(ctx, "Evaluation result retrieved successfully")
-	return detail, nil
-}
-
-// Evaluation starts a new evaluation task with given parameters
-// datasetID: ID of the dataset to evaluate against
-// knowledgeBaseID: ID of the knowledge base to use (empty to create new)
-// chatModelID: ID of the chat model to evaluate
-// rerankModelID: ID of the rerank model to evaluate
-func (e *EvaluationService) Evaluation(ctx context.Context,
-	datasetID string, knowledgeBaseID string, chatModelID string, rerankModelID string,
-) (*types.EvaluationDetail, error) {
-	logger.Info(ctx, "Start evaluation")
-	logger.Infof(ctx, "Dataset ID: %s, Knowledge Base ID: %s, Chat Model ID: %s, Rerank Model ID: %s",
-		datasetID, knowledgeBaseID, chatModelID, rerankModelID)
-
-	// Get tenant ID from context for multi-tenancy support
-	tenantID := types.MustTenantIDFromContext(ctx)
-	logger.Infof(ctx, "Tenant ID: %d", tenantID)
-
-	// Handle knowledge base creation if not provided
-	if knowledgeBaseID == "" {
-		logger.Info(ctx, "No knowledge base ID provided, creating new knowledge base")
-		// Create new knowledge base with default evaluation settings
-		// 获取默认的嵌入模型和LLM模型
-		models, err := e.modelService.ListModels(ctx)
+	kb := &types.KnowledgeBase{Name: "Evaluation", Description: "Evaluation dataset corpus", IsTemporary: true}
+	if knowledgeBaseID != "" {
+		reference, err := e.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledgeBaseID)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to list models: %v", err)
 			return nil, err
 		}
-
-		var embeddingModelID, llmModelID string
-		for _, model := range models {
-			if model == nil {
-				continue
-			}
-			if model.Type == types.ModelTypeEmbedding {
-				embeddingModelID = model.ID
-			}
-			if model.Type == types.ModelTypeKnowledgeQA {
-				llmModelID = model.ID
-			}
+		if reference.TenantID != tenantID {
+			return nil, apperrors.NewNotFoundError("Reference knowledge base not found in this workspace")
 		}
-
-		if embeddingModelID == "" || llmModelID == "" {
-			return nil, fmt.Errorf("no default models found for evaluation")
-		}
-
-		kb, err := e.knowledgeBaseService.CreateKnowledgeBase(ctx, &types.KnowledgeBase{
-			Name:             "evaluation",
-			Description:      "evaluation",
-			EmbeddingModelID: embeddingModelID,
-			SummaryModelID:   llmModelID,
-		})
-		if err != nil {
-			logger.Errorf(ctx, "Failed to create knowledge base: %v", err)
-			return nil, err
-		}
-		knowledgeBaseID = kb.ID
-		logger.Infof(ctx, "Created new knowledge base with ID: %s", knowledgeBaseID)
+		kb.EmbeddingModelID = reference.EmbeddingModelID
+		kb.SummaryModelID = reference.SummaryModelID
+		kb.ChunkingConfig = reference.ChunkingConfig
+		kb.IndexingStrategy = reference.IndexingStrategy
+		kb.VectorStoreID = reference.VectorStoreID
 	} else {
-		logger.Infof(ctx, "Using existing knowledge base ID: %s", knowledgeBaseID)
-		// Create evaluation-specific knowledge base based on existing one
-		kb, err := e.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledgeBaseID)
+		kb.EmbeddingModelID, err = resolveEvaluationModel(models, types.ModelTypeEmbedding, "")
 		if err != nil {
-			logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 			return nil, err
 		}
-
-		kb, err = e.knowledgeBaseService.CreateKnowledgeBase(ctx, &types.KnowledgeBase{
-			Name:             "evaluation",
-			Description:      "evaluation",
-			EmbeddingModelID: kb.EmbeddingModelID,
-			SummaryModelID:   kb.SummaryModelID,
-		})
-		if err != nil {
-			logger.Errorf(ctx, "Failed to create knowledge base: %v", err)
-			return nil, err
+		if kb.EmbeddingModelID == "" {
+			return nil, apperrors.NewBadRequestError("Evaluation requires a configured embedding model")
 		}
-		knowledgeBaseID = kb.ID
-		logger.Infof(ctx, "Created new knowledge base with ID: %s based on existing one", knowledgeBaseID)
+		kb.SummaryModelID = chatModelID
 	}
-
-	// Set default values for optional parameters
-	if datasetID == "" {
-		datasetID = "default"
-		logger.Info(ctx, "Using default dataset")
+	createdKB, err := e.knowledgeBaseService.CreateKnowledgeBase(ctx, kb)
+	if err != nil {
+		return nil, fmt.Errorf("create evaluation knowledge base: %w", err)
 	}
-
-	if rerankModelID == "" {
-		// 获取默认的重排模型
-		models, err := e.modelService.ListModels(ctx)
-		if err == nil {
-			for _, model := range models {
-				if model == nil {
-					continue
-				}
-				if model.Type == types.ModelTypeRerank {
-					rerankModelID = model.ID
-					break
-				}
-			}
-		}
-		if rerankModelID == "" {
-			logger.Warnf(ctx, "No rerank model found, skipping rerank")
-		} else {
-			logger.Infof(ctx, "Using default rerank model: %s", rerankModelID)
-		}
-	}
-
-	if chatModelID == "" {
-		// 获取默认的LLM模型
-		models, err := e.modelService.ListModels(ctx)
-		if err == nil {
-			for _, model := range models {
-				if model == nil {
-					continue
-				}
-				if model.Type == types.ModelTypeKnowledgeQA {
-					chatModelID = model.ID
-					break
-				}
-			}
-		}
-		if chatModelID == "" {
-			return nil, fmt.Errorf("no default chat model found")
-		}
-		logger.Infof(ctx, "Using default chat model: %s", chatModelID)
-	}
-
-	// Create evaluation task with unique ID
-	logger.Info(ctx, "Creating evaluation task")
-	taskID := utils.GenerateTaskID("evaluation", tenantID, datasetID)
-	logger.Infof(ctx, "Generated task ID: %s", taskID)
-
-	// Prepare evaluation detail with all parameters
 	detail := &types.EvaluationDetail{
 		Task: &types.EvaluationTask{
-			ID:        taskID,
-			TenantID:  tenantID,
-			DatasetID: datasetID,
-			Status:    types.EvaluationStatuePending,
-			StartTime: time.Now(),
+			ID: utils.GenerateTaskID("evaluation", tenantID, datasetID), TenantID: tenantID,
+			DatasetID: datasetID, DatasetVersion: snapshot.Version, DatasetVersionLabel: snapshot.PublishedVersion, KnowledgeBaseID: knowledgeBaseID,
+			MetricVersion: "corpus-passage-v3", EmbeddingModelID: createdKB.EmbeddingModelID,
+			Status: types.EvaluationStatuePending, StartTime: time.Now(), Total: snapshot.Total,
 		},
-		Params: &types.ChatManage{
-			PipelineRequest: types.PipelineRequest{
-				VectorThreshold:  e.config.Conversation.VectorThreshold,
-				KeywordThreshold: e.config.Conversation.KeywordThreshold,
-				EmbeddingTopK:    e.config.Conversation.EmbeddingTopK,
-				MaxRounds:        e.config.Conversation.MaxRounds,
-				RerankModelID:    rerankModelID,
-				RerankTopK:       e.config.Conversation.RerankTopK,
-				RerankThreshold:  e.config.Conversation.RerankThreshold,
-				ChatModelID:      chatModelID,
-				SummaryConfig: types.SummaryConfig{
-					MaxTokens:           e.config.Conversation.Summary.MaxTokens,
-					RepeatPenalty:       e.config.Conversation.Summary.RepeatPenalty,
-					TopK:                e.config.Conversation.Summary.TopK,
-					TopP:                e.config.Conversation.Summary.TopP,
-					Prompt:              e.config.Conversation.Summary.Prompt,
-					ContextTemplate:     e.config.Conversation.Summary.ContextTemplate,
-					FrequencyPenalty:    e.config.Conversation.Summary.FrequencyPenalty,
-					PresencePenalty:     e.config.Conversation.Summary.PresencePenalty,
-					NoMatchPrefix:       e.config.Conversation.Summary.NoMatchPrefix,
-					Temperature:         e.config.Conversation.Summary.Temperature,
-					Seed:                e.config.Conversation.Summary.Seed,
-					MaxCompletionTokens: e.config.Conversation.Summary.MaxCompletionTokens,
-				},
-				FallbackResponse:    e.config.Conversation.FallbackResponse,
-				RewritePromptSystem: e.config.Conversation.RewritePromptSystem,
-				RewritePromptUser:   e.config.Conversation.RewritePromptUser,
-			},
-		},
+		Params:  e.evaluationParams(chatModelID, rerankModelID),
+		Results: make([]types.EvaluationItemResult, len(snapshot.Items)),
 	}
-
-	// Store evaluation task in memory storage
-	logger.Info(ctx, "Registering evaluation task")
-	e.evaluationMemoryStorage.register(detail)
-
-	// Start evaluation in background goroutine
-	logger.Info(ctx, "Starting evaluation in background")
-	go func() {
-		// Create new context with logger for background task
-		newCtx := logger.CloneContext(ctx)
-		logger.Infof(newCtx, "Background evaluation started for task ID: %s", taskID)
-
-		// Update task status to running
-		detail.Task.Status = types.EvaluationStatueRunning
-		logger.Info(newCtx, "Evaluation task status set to running")
-
-		// Execute actual evaluation
-		if err := e.EvalDataset(newCtx, detail, knowledgeBaseID); err != nil {
-			detail.Task.Status = types.EvaluationStatueFailed
-			detail.Task.ErrMsg = err.Error()
-			logger.Errorf(newCtx, "Evaluation task failed: %v, task ID: %s", err, taskID)
-			return
+	for i, item := range snapshot.Items {
+		detail.Results[i] = types.EvaluationItemResult{
+			QID: item.QID, Question: item.Question, ReferenceAnswer: item.Answer, PIDs: item.PIDs, Passages: item.Passages,
+			Status: "pending", Steps: make([]types.PipelineTraceStep, 0),
 		}
-
-		// Mark task as completed successfully
-		logger.Infof(newCtx, "Evaluation task completed successfully, task ID: %s", taskID)
-		detail.Task.Status = types.EvaluationStatueSuccess
-	}()
-
-	logger.Infof(ctx, "Evaluation task created successfully, task ID: %s", taskID)
+	}
+	if err := e.repository.Save(ctx, detail); err != nil {
+		cleanupErr := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, createdKB.ID)
+		return nil, errors.Join(err, cleanupErr)
+	}
+	workerCtx := logger.CloneContext(ctx)
+	go e.runEvaluation(workerCtx, detail, createdKB.ID, snapshot)
 	return detail, nil
 }
 
-// EvalDataset performs the actual evaluation of a dataset
-// Processes each QA pair in parallel and records metrics
-func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.EvaluationDetail, knowledgeBaseID string) error {
-	logger.Info(ctx, "Start evaluating dataset")
-	logger.Infof(ctx, "Task ID: %s, Dataset ID: %s", detail.Task.ID, detail.Task.DatasetID)
-
-	// Retrieve dataset from storage
-	dataset, err := e.dataset.GetDatasetByID(ctx, detail.Task.DatasetID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get dataset: %v", err)
-		return err
-	}
-	logger.Infof(ctx, "Dataset retrieved successfully with %d QA pairs", len(dataset))
-
-	// Update total QA pairs count in task details
-	e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
-		params.Task.Total = len(dataset)
-		logger.Infof(ctx, "Updated task total to %d QA pairs", params.Task.Total)
-	})
-
-	// Extract and organize passages from dataset
-	passages := getPassageList(dataset)
-	logger.Infof(ctx, "Creating knowledge from %d passages", len(passages))
-
-	// Create knowledge base from passages (sync: wait for indexing to complete before querying)
-	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
-		return err
-	}
-	logger.Infof(ctx, "Knowledge created and indexed successfully, ID: %s", knowledge.ID)
-
-	// Setup cleanup of temporary resources
-	defer func() {
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
-		if err := deleteReferencedKnowledge(ctx,
-			e.knowledgeService,
-			knowledgeBaseID,
-			[]string{knowledge.ID}); err != nil {
-			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
+func resolveEvaluationModel(models []*types.Model, modelType types.ModelType, requested string) (string, error) {
+	var selected string
+	for _, model := range models {
+		if model == nil || model.Type != modelType {
+			continue
 		}
-
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
-		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); err != nil {
-			logger.Errorf(
-				ctx,
-				"Failed to delete knowledge base: %v, knowledge base ID: %s",
-				err, knowledgeBaseID,
-			)
+		if requested != "" {
+			if model.ID == requested {
+				return requested, nil
+			}
+			continue
 		}
-	}()
-
-	// Initialize parallel evaluation metrics
-	var finished int
-	var mu sync.Mutex
-	var g errgroup.Group
-	metricHook := NewHookMetric(len(dataset))
-
-	// Set worker limit based on available CPUs
-	g.SetLimit(max(runtime.GOMAXPROCS(0)-1, 1))
-	logger.Infof(ctx, "Starting evaluation with %d parallel workers", max(runtime.GOMAXPROCS(0)-1, 1))
-
-	// Process each QA pair in parallel
-	for i, qaPair := range dataset {
-		qaPair := qaPair
-		i := i
-		g.Go(func() error {
-			logger.Infof(ctx, "Processing QA pair %d, question: %s", i, qaPair.Question)
-
-			// Prepare chat management parameters for this QA pair
-			chatManage := detail.Params.Clone()
-			chatManage.Query = qaPair.Question
-			chatManage.RewriteQuery = qaPair.Question
-			// Set knowledge base ID and search targets for this evaluation
-			chatManage.KnowledgeBaseIDs = []string{knowledgeBaseID}
-			chatManage.SearchTargets = types.SearchTargets{
-				&types.SearchTarget{
-					Type:            types.SearchTargetTypeKnowledgeBase,
-					KnowledgeBaseID: knowledgeBaseID,
-				},
-			}
-
-			// Execute knowledge QA pipeline
-			logger.Infof(ctx, "Running knowledge QA for question: %s", qaPair.Question)
-			err = e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
-			if err != nil {
-				logger.Errorf(ctx, "Failed to process question %d: %v", i, err)
-				return err
-			}
-
-			// Record evaluation metrics
-			logger.Infof(ctx, "Recording metrics for QA pair %d", i)
-			metricHook.recordInit(i)
-			metricHook.recordQaPair(i, qaPair)
-			metricHook.recordSearchResult(i, chatManage.SearchResult)
-			metricHook.recordRerankResult(i, chatManage.RerankResult)
-			metricHook.recordChatResponse(i, chatManage.ChatResponse)
-			metricHook.recordFinish(i)
-
-			// Update progress metrics
-			mu.Lock()
-			finished += 1
-			metricResult := metricHook.MetricResult()
-			mu.Unlock()
-			e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
-				params.Metric = metricResult
-				params.Task.Finished = finished
-				logger.Infof(ctx, "Updated task progress: %d/%d completed", finished, params.Task.Total)
-			})
-			return nil
-		})
+		if model.IsDefault {
+			return model.ID, nil
+		}
+		if selected == "" {
+			selected = model.ID
+		}
 	}
-
-	// Wait for all parallel evaluations to complete
-	logger.Info(ctx, "Waiting for all evaluation tasks to complete")
-	if err := g.Wait(); err != nil {
-		logger.Errorf(ctx, "Evaluation error: %v", err)
-		return err
+	if requested != "" {
+		return "", apperrors.NewBadRequestError(fmt.Sprintf("Evaluation model %s is unavailable or is not type %s", requested, modelType))
 	}
-
-	// Final update of evaluation metrics
-	e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
-		params.Metric = metricHook.MetricResult()
-		params.Task.Finished = finished
-	})
-
-	logger.Infof(ctx, "Dataset evaluation completed successfully, task ID: %s", detail.Task.ID)
-	return nil
+	return selected, nil
 }
 
-// getPassageList extracts and organizes passages from QA pairs
-// Returns a slice of passages indexed by their passage IDs
-func getPassageList(dataset []*types.QAPair) []string {
-	pIDMap := make(map[int]string)
-	maxPID := 0
-	for _, qaPair := range dataset {
-		for i := 0; i < len(qaPair.PIDs); i++ {
-			pIDMap[qaPair.PIDs[i]] = qaPair.Passages[i]
-			maxPID = max(maxPID, qaPair.PIDs[i])
+func (e *EvaluationService) evaluationParams(chatModelID string, rerankModelID string) *types.ChatManage {
+	return &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			VectorThreshold:  e.config.Conversation.VectorThreshold,
+			KeywordThreshold: e.config.Conversation.KeywordThreshold,
+			EmbeddingTopK:    e.config.Conversation.EmbeddingTopK,
+			MaxRounds:        e.config.Conversation.MaxRounds,
+			RerankModelID:    rerankModelID,
+			RerankTopK:       e.config.Conversation.RerankTopK,
+			RerankThreshold:  e.config.Conversation.RerankThreshold,
+			ChatModelID:      chatModelID,
+			SummaryConfig: types.SummaryConfig{
+				MaxTokens:           e.config.Conversation.Summary.MaxTokens,
+				RepeatPenalty:       e.config.Conversation.Summary.RepeatPenalty,
+				TopK:                e.config.Conversation.Summary.TopK,
+				TopP:                e.config.Conversation.Summary.TopP,
+				Prompt:              e.config.Conversation.Summary.Prompt,
+				ContextTemplate:     e.config.Conversation.Summary.ContextTemplate,
+				FrequencyPenalty:    e.config.Conversation.Summary.FrequencyPenalty,
+				PresencePenalty:     e.config.Conversation.Summary.PresencePenalty,
+				NoMatchPrefix:       e.config.Conversation.Summary.NoMatchPrefix,
+				Temperature:         e.config.Conversation.Summary.Temperature,
+				Seed:                e.config.Conversation.Summary.Seed,
+				MaxCompletionTokens: e.config.Conversation.Summary.MaxCompletionTokens,
+			},
+			FallbackResponse:    e.config.Conversation.FallbackResponse,
+			RewritePromptSystem: e.config.Conversation.RewritePromptSystem,
+			RewritePromptUser:   e.config.Conversation.RewritePromptUser,
+		},
+	}
+}
+
+func (e *EvaluationService) updateRun(ctx context.Context, taskID string, update func(*types.EvaluationDetail)) error {
+	e.updateMu.Lock()
+	defer e.updateMu.Unlock()
+	detail, err := e.repository.Get(ctx, types.MustTenantIDFromContext(ctx), taskID)
+	if err != nil {
+		return err
+	}
+	if detail.Task.Status == types.EvaluationStatueSuccess || detail.Task.Status == types.EvaluationStatueFailed {
+		return apperrors.NewConflictError("Evaluation task is already complete")
+	}
+	update(detail)
+	return e.repository.Save(ctx, detail)
+}
+
+func (e *EvaluationService) runEvaluation(ctx context.Context, detail *types.EvaluationDetail, knowledgeBaseID string, snapshot *types.EvaluationDataset) {
+	taskID := detail.Task.ID
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	defer cancelWorker()
+	leaseCtx, stopLease := context.WithCancel(ctx)
+	leaseResult := make(chan error, 1)
+	go func() {
+		err := e.maintainEvaluationLease(leaseCtx, taskID)
+		if err != nil {
+			cancelWorker()
+		}
+		leaseResult <- err
+	}()
+	runErr := e.executeEvaluation(workerCtx, detail, knowledgeBaseID, snapshot)
+	if cleanupErr := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); cleanupErr != nil {
+		runErr = errors.Join(runErr, fmt.Errorf("delete evaluation knowledge base %s: %w", knowledgeBaseID, cleanupErr))
+	}
+	stopLease()
+	runErr = errors.Join(runErr, <-leaseResult)
+	err := e.updateRun(ctx, taskID, func(current *types.EvaluationDetail) {
+		ended := time.Now()
+		current.Task.EndTime = &ended
+		current.Task.Status = types.EvaluationStatueSuccess
+		if runErr != nil {
+			current.Task.Status = types.EvaluationStatueFailed
+			current.Task.ErrMsg = runErr.Error()
+			for i := range current.Results {
+				if current.Results[i].Status == "pending" || current.Results[i].Status == "running" {
+					current.Results[i].Status = "failed"
+					current.Results[i].Error = runErr.Error()
+					current.Task.Failed++
+					current.Task.Finished++
+				}
+			}
+		} else if current.Task.Failed > 0 {
+			current.Task.Status = types.EvaluationStatueFailed
+			current.Task.ErrMsg = fmt.Sprintf("%d of %d evaluation questions failed; inspect question errors", current.Task.Failed, current.Task.Total)
+		}
+	})
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"task_id": taskID, "operation": "save_evaluation_result"})
+	}
+	if runErr != nil {
+		logger.ErrorWithFields(ctx, runErr, map[string]interface{}{"task_id": taskID, "operation": "execute_evaluation"})
+	}
+}
+
+// maintainEvaluationLease 长索引阶段也续租，避免跨实例误判 / Renews leases even during long indexing stages.
+func (e *EvaluationService) maintainEvaluationLease(ctx context.Context, taskID string) error {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := e.repository.Heartbeat(ctx, types.MustTenantIDFromContext(ctx), taskID); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
 		}
 	}
-	passages := make([]string, maxPID+1)
-	for i := 0; i <= maxPID; i++ {
-		if _, ok := pIDMap[i]; ok {
-			passages[i] = pIDMap[i]
+}
+
+func (e *EvaluationService) executeEvaluation(ctx context.Context, detail *types.EvaluationDetail, knowledgeBaseID string, snapshot *types.EvaluationDataset) (runErr error) {
+	taskID := detail.Task.ID
+	if err := e.updateRun(ctx, taskID, func(current *types.EvaluationDetail) { current.Task.Status = types.EvaluationStatueRunning }); err != nil {
+		return err
+	}
+	passages := make([]string, len(snapshot.Corpus))
+	for i, passage := range snapshot.Corpus {
+		passages[i] = passage.Text
+	}
+	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
+	if err != nil {
+		return fmt.Errorf("index evaluation corpus: %w", err)
+	}
+	if knowledge == nil {
+		return fmt.Errorf("index evaluation corpus: knowledge service returned no knowledge record")
+	}
+	defer func() {
+		if err := deleteReferencedKnowledge(ctx, e.knowledgeService, knowledgeBaseID, []string{knowledge.ID}); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("delete evaluation corpus %s: %w", knowledge.ID, err))
+		}
+	}()
+	if err := validateEvaluationCorpusIndex(knowledge); err != nil {
+		return err
+	}
+	var group errgroup.Group
+	group.SetLimit(max(runtime.GOMAXPROCS(0)-1, 1))
+	for index, item := range snapshot.Items {
+		index, item := index, item
+		group.Go(func() error {
+			if err := e.updateRun(ctx, taskID, func(current *types.EvaluationDetail) { current.Results[index].Status = "running" }); err != nil {
+				return err
+			}
+			result := e.evaluateQuestion(ctx, detail.Params, knowledgeBaseID, item, snapshot.Corpus)
+			return e.updateRun(ctx, taskID, func(current *types.EvaluationDetail) {
+				current.Results[index] = result
+				current.Task.Finished++
+				if result.Status == "failed" {
+					current.Task.Failed++
+				}
+				current.Metric = averageEvaluationResults(current.Results)
+			})
+		})
+	}
+	return group.Wait()
+}
+
+// validateEvaluationCorpusIndex 校验已可检索的索引，允许摘要仍异步处理 / Validates retrievable indexes while summaries may still run asynchronously.
+func validateEvaluationCorpusIndex(knowledge *types.Knowledge) error {
+	switch knowledge.ParseStatus {
+	case types.ParseStatusProcessing, types.ParseStatusFinalizing, types.ParseStatusCompleted:
+		if knowledge.EnableStatus == "enabled" && knowledge.ProcessedAt != nil {
+			return nil
 		}
 	}
-	return passages
+	return fmt.Errorf("index evaluation corpus %s is not ready: status=%q, enable_status=%q, reason=%s", knowledge.ID, knowledge.ParseStatus, knowledge.EnableStatus, knowledge.ErrorMessage)
+}
+
+func (e *EvaluationService) evaluateQuestion(ctx context.Context, params *types.ChatManage, knowledgeBaseID string, item types.EvaluationDatasetItem, corpus []types.EvaluationPassage) types.EvaluationItemResult {
+	started := time.Now()
+	result := types.EvaluationItemResult{
+		QID: item.QID, Question: item.Question, ReferenceAnswer: item.Answer, PIDs: item.PIDs, Passages: item.Passages,
+		Status: "running", Steps: make([]types.PipelineTraceStep, 0),
+	}
+	chatManage := params.Clone()
+	chatManage.Query = item.Question
+	chatManage.RewriteQuery = item.Question
+	chatManage.KnowledgeBaseIDs = []string{knowledgeBaseID}
+	chatManage.SearchTargets = types.SearchTargets{&types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: knowledgeBaseID}}
+	chatManage.PipelineTraceObserver = func(step types.PipelineTraceStep) {
+		if types.EventType(step.ID) == types.CHUNK_RERANK && chatManage.RerankDiagnostics != nil {
+			diagnostics := chatManage.RerankDiagnostics
+			switch diagnostics.Outcome {
+			case types.RerankOutcomeNoModel, types.RerankOutcomeDisabled, types.RerankOutcomeNoCandidates:
+				result.Steps = append(result.Steps, step)
+				return
+			case types.RerankOutcomeModelError, types.RerankOutcomeModelUnavailable:
+				step.Status = "failed"
+				step.Error = fmt.Sprintf("Rerank model %s failed: %s", diagnostics.ModelID, diagnostics.Error)
+				result.Error = step.Error
+			}
+		}
+		if step.Status != "success" {
+			result.Steps = append(result.Steps, step)
+			return
+		}
+		switch types.EventType(step.ID) {
+		case types.CHUNK_SEARCH, types.CHUNK_SEARCH_PARALLEL, types.CHUNK_RERANK:
+			step.Metric = calculateEvaluationMetrics(item, step.Documents, "", corpus)
+			step.Metric.GenerationMetrics = types.GenerationMetrics{}
+			step.MetricScope = "retrieval"
+		case types.CHAT_COMPLETION, types.EventType("fallback_response"):
+			if chatManage.ChatResponse != nil {
+				step.Metric = calculateEvaluationMetrics(item, nil, chatManage.ChatResponse.Content, corpus)
+				step.Metric.RetrievalMetrics = types.RetrievalMetrics{}
+				step.MetricScope = "generation"
+			}
+		}
+		result.Steps = append(result.Steps, step)
+	}
+	err := e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipeline["rag"])
+	result.DurationMS = time.Since(started).Milliseconds()
+	if chatManage.ChatResponse != nil {
+		result.Answer = chatManage.ChatResponse.Content
+		usage := chatManage.ChatResponse.Usage
+		result.Usage = &usage
+	}
+	if err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		return result
+	}
+	if result.Error != "" {
+		result.Status = "failed"
+		return result
+	}
+	if chatManage.ChatResponse == nil {
+		result.Status = "failed"
+		result.Error = "Question pipeline completed without an answer response"
+		return result
+	}
+	result.Status = "success"
+	documents := snapshotPipelineDocuments(chatManage.SearchResult)
+	if chatManage.RerankResult != nil {
+		documents = snapshotPipelineDocuments(chatManage.RerankResult)
+	}
+	result.Metric = calculateEvaluationMetrics(item, documents, result.Answer, corpus)
+	return result
 }
